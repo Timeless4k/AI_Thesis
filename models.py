@@ -10,6 +10,11 @@ from tensorflow.keras import layers, models
 import warnings
 warnings.filterwarnings('ignore')
 
+# === Constants ===
+CLASS_LABELS = {'Low': 0, 'Medium': 1, 'High': 2}
+REVERSE_CLASS_LABELS = {v: k for k, v in CLASS_LABELS.items()}
+debug = False  # Set to True to see training progress
+
 class BaselineModels:
     """Baseline models for benchmarking"""
     
@@ -187,10 +192,8 @@ class ModelEvaluator:
         """Evaluate classification performance"""
         # Convert string labels to numeric if needed
         if isinstance(y_true[0], str):
-            label_map = {'Low': 0, 'Medium': 1, 'High': 2}
-            y_true = [label_map.get(y, y) for y in y_true]
-            y_pred = [label_map.get(y, y) for y in y_pred]
-            
+            y_true = [CLASS_LABELS.get(y, y) for y in y_true]
+            y_pred = [CLASS_LABELS.get(y, y) for y in y_pred]
         metrics = {
             'Accuracy': accuracy_score(y_true, y_pred),
             'F1': f1_score(y_true, y_pred, average='weighted'),
@@ -218,11 +221,9 @@ def run_model_comparison(pipeline, ticker='AAPL', task='regression'):
     for model_name in ['Baseline', 'ARIMA', 'XGBoost', 'LSTM', 'StockMixer']:
         print(f"\nTraining {model_name}...")
         model_results = []
-        
         for i, split in enumerate(splits):
             X_train, y_train = split['train']
             X_test, y_test = split['test']
-            
             try:
                 if task == 'regression':
                     # Regression models
@@ -243,10 +244,8 @@ def run_model_comparison(pipeline, ticker='AAPL', task='regression'):
                         )
                         X_test_seq = X_test_seq[-len(X_test):]
                         y_test_seq = y_test_seq[-len(X_test):]
-                        
-                        # Build and train
                         lstm_model = DeepLearningModels.build_lstm_regressor((10, X.shape[1]))
-                        lstm_model.fit(X_train_seq, y_train_seq, epochs=20, verbose=0)
+                        lstm_model.fit(X_train_seq, y_train_seq, epochs=20, verbose=1 if debug else 0)
                         y_pred = lstm_model.predict(X_test_seq).flatten()
                         y_test = y_test_seq
                     elif model_name == 'StockMixer':
@@ -263,33 +262,32 @@ def run_model_comparison(pipeline, ticker='AAPL', task='regression'):
                     if model_name == 'Baseline':
                         y_pred = BaselineModels.random_classifier(X_train, y_train, X_test)
                     elif model_name == 'XGBoost':
-                        # Convert labels to numeric
-                        label_map = {'Low': 0, 'Medium': 1, 'High': 2}
-                        y_train_num = y_train.map(label_map)
-                        
+                        y_train_num = y_train.map(CLASS_LABELS)
                         xgb_model = xgb.XGBClassifier(n_estimators=100, random_state=42)
                         xgb_model.fit(X_train, y_train_num)
                         y_pred_num = xgb_model.predict(X_test)
-                        
-                        # Convert back to labels
-                        reverse_map = {v: k for k, v in label_map.items()}
-                        y_pred = [reverse_map[p] for p in y_pred_num]
+                        y_pred = [REVERSE_CLASS_LABELS[p] for p in y_pred_num]
                     elif model_name == 'LSTM':
-                        # Similar to regression but with classifier
-                        pass  # Skip for brevity
+                        # Prepare LSTM sequences
+                        X_train_seq, y_train_seq = DeepLearningModels.prepare_lstm_data(X_train, y_train.map(CLASS_LABELS))
+                        X_test_seq, y_test_seq = DeepLearningModels.prepare_lstm_data(
+                            pd.concat([X_train.tail(10), X_test]), 
+                            pd.concat([y_train.tail(10), y_test]).map(CLASS_LABELS)
+                        )
+                        X_test_seq = X_test_seq[-len(X_test):]
+                        y_test_seq = y_test_seq[-len(X_test):]
+                        lstm_model = DeepLearningModels.build_lstm_classifier((10, X.shape[1]), num_classes=3)
+                        lstm_model.fit(X_train_seq, y_train_seq, epochs=20, verbose=1 if debug else 0)
+                        y_pred_num = np.argmax(lstm_model.predict(X_test_seq), axis=1)
+                        y_pred = [REVERSE_CLASS_LABELS[p] for p in y_pred_num]
+                        y_test = [REVERSE_CLASS_LABELS[t] for t in y_test_seq]
                     elif model_name == 'StockMixer':
-                        # Convert labels
-                        label_map = {'Low': 0, 'Medium': 1, 'High': 2}
-                        y_train_num = y_train.map(label_map)
-                        
+                        y_train_num = y_train.map(CLASS_LABELS)
                         sm = StockMixer(n_features=X_train.shape[1])
                         sm.build_model(task='classification')
                         sm.fit(X_train, y_train_num, epochs=30)
                         y_pred_num = np.argmax(sm.predict(X_test), axis=1)
-                        
-                        # Convert back
-                        reverse_map = {v: k for k, v in label_map.items()}
-                        y_pred = [reverse_map[p] for p in y_pred_num]
+                        y_pred = [REVERSE_CLASS_LABELS[p] for p in y_pred_num]
                     
                     # Evaluate
                     metrics = ModelEvaluator.evaluate_classification(y_test, y_pred)
@@ -313,6 +311,24 @@ def run_model_comparison(pipeline, ticker='AAPL', task='regression'):
                         avg_metrics[key] = np.mean(values)
             
             print(f"  Average performance: {avg_metrics}")
+            
+            # Optional: Regime-based averages
+            regime_groups = {}
+            for r in model_results:
+                regime = r['regime']
+                for k, v in r.items():
+                    if k != 'regime':
+                        regime_groups.setdefault(regime, {}).setdefault(k, []).append(v)
+            for regime, metrics in regime_groups.items():
+                print(f"  [{regime}] Regime Performance:")
+                for metric, vals in metrics.items():
+                    print(f"    {metric}: {np.mean(vals):.4f}")
+            
+            # Export average metrics to CSV
+            try:
+                pd.DataFrame.from_dict(avg_metrics, orient='index', columns=[model_name]).to_csv(f"{model_name}_summary.csv")
+            except Exception as e:
+                print(f"  Could not save CSV for {model_name}: {e}")
     
     return results
 

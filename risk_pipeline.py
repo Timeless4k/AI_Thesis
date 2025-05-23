@@ -3,7 +3,7 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import TimeSeriesSplit
+from sklearn.model_selection import TimeSeriesSplit, StratifiedKFold, StratifiedShuffleSplit
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -11,6 +11,7 @@ class RiskPipeline:
     """
     Core pipeline for volatility forecasting as described in the thesis.
     Handles data fetching, feature engineering, model training, and evaluation.
+    Now includes stratified sampling for classification tasks.
     """
     
     def __init__(self, start_date='2017-01-01', end_date='2024-03-31'):
@@ -71,9 +72,8 @@ class RiskPipeline:
             df['Volatility5D'] = df['log_return'].rolling(5).std() * np.sqrt(252)
             
             # Volatility regime classification (quantile-based)
-            df['Volatility5D_clean'] = df['Volatility5D'].dropna()
-            if len(df['Volatility5D_clean']) > 0:
-                quantiles = df['Volatility5D_clean'].quantile([0.33, 0.67])
+            if df['Volatility5D'].dropna().shape[0] > 0:
+                quantiles = df['Volatility5D'].dropna().quantile([0.33, 0.67])
                 df['VolRegime'] = pd.cut(df['Volatility5D'], 
                                         bins=[-np.inf, quantiles[0.33], quantiles[0.67], np.inf],
                                         labels=['Low', 'Medium', 'High'])
@@ -140,6 +140,7 @@ class RiskPipeline:
                     
     def prepare_ml_data(self, ticker, task='regression'):
         """Prepare data for ML models with proper preprocessing"""
+        print(f"\nPreparing data for {ticker} | Task: {task} | Features: {self.features[ticker].shape[1]}")
         
         # Get features and target
         X = self.features[ticker].copy()
@@ -160,31 +161,42 @@ class RiskPipeline:
         
         return X_scaled, y, scaler
     
-    def walk_forward_split(self, X, y, n_splits=5):
+    def walk_forward_split(self, X, y, n_splits=5, task='regression', ticker='Unknown'):
         """
-        Implement walk-forward cross-validation as per thesis Section 2.5
+        Walk-forward cross-validation with optional stratified sampling for classification tasks.
+        For classification, uses StratifiedShuffleSplit within each walk-forward fold.
         """
-        tscv = TimeSeriesSplit(n_splits=n_splits, test_size=len(X)//10)
+        print(f"\nCreating walk-forward splits for task: {task}")
         
         splits = []
-        for train_idx, test_idx in tscv.split(X):
-            # Get train/test data
+        tscv = TimeSeriesSplit(n_splits=n_splits, test_size=len(X) // 10)
+        
+        for i, (train_idx, test_idx) in enumerate(tscv.split(X)):
             X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
             y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
             
-            # Determine market regime for test period
-            if hasattr(y_test, 'index'):
-                test_returns = self.data[X.index.name if hasattr(X.index, 'name') else 'Unknown']['log_return'].loc[y_test.index]
-                regime = self._classify_regime(test_returns)
-            else:
-                regime = 'Unknown'
-                
+            if task == 'classification':
+                # Stratify within the training set
+                sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+                try:
+                    strat_train_idx, _ = next(sss.split(X_train, y_train))
+                    X_train = X_train.iloc[strat_train_idx]
+                    y_train = y_train.iloc[strat_train_idx]
+                except ValueError:
+                    print(f"⚠️ Warning: Stratified split failed for fold {i+1} due to insufficient class balance.")
+            
+            # Determine market regime using ticker
+            regime = self._classify_regime(self.data[ticker]['log_return'].loc[y_test.index] if ticker in self.data else pd.Series())
+            
             splits.append({
                 'train': (X_train, y_train),
                 'test': (X_test, y_test),
                 'regime': regime
             })
-            
+
+            if task == 'classification':
+                print(f"Fold {i+1} class balance: {y_train.value_counts(normalize=True).round(2).to_dict()}")
+        
         return splits
     
     def _classify_regime(self, returns):

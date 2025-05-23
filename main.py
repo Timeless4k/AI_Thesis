@@ -7,6 +7,10 @@ This implements the methodology described in the thesis document.
 import sys
 import os
 import warnings
+import argparse
+import platform
+from datetime import datetime
+
 warnings.filterwarnings('ignore')
 
 # Import all components
@@ -17,27 +21,34 @@ from models import (
 )
 from experiment_runner import ExperimentRunner, InterpretabilityAnalysis
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run the short-term volatility forecasting experiment.")
+    parser.add_argument('--full', action='store_true', help="Run the full thesis experiment")
+    parser.add_argument('--output', type=str, default='./thesis_results', help="Directory to save results")
+    parser.add_argument('--headless', action='store_true', help="Run in headless mode (no GUI backend)")
+    return parser.parse_args()
+
 def check_dependencies():
-    """Check if all required packages are installed"""
+    """Check if all required packages are installed and print their versions"""
     required_packages = [
         'numpy', 'pandas', 'yfinance', 'sklearn', 
-        'statsmodels', 'xgboost', 'tensorflow', 'shap'
+        'statsmodels', 'xgboost', 'tensorflow', 'shap', 'matplotlib', 'seaborn'
     ]
-    
+    print(f"\nPython version: {platform.python_version()}")
     missing = []
     for package in required_packages:
         try:
-            __import__(package)
+            pkg = __import__(package)
+            version = getattr(pkg, '__version__', 'unknown')
+            print(f"{package} version: {version}")
         except ImportError:
             missing.append(package)
-    
     if missing:
         print("Missing required packages:")
         for pkg in missing:
             print(f"  - {pkg}")
         print("\nPlease install using: pip install -r requirements.txt")
         return False
-    
     return True
 
 def run_quick_demo():
@@ -62,75 +73,55 @@ def run_quick_demo():
     
     print("\nDemo completed! Run with --full for complete thesis experiment.")
 
-def run_full_experiment():
-    """Run the complete thesis experiment"""
+def run_full_experiment(output_dir='./thesis_results', log_stdout=True):
+    """Run the complete thesis experiment and log output"""
     print("\n" + "="*80)
     print("FULL THESIS EXPERIMENT - SHORT-TERM VOLATILITY FORECASTING")
     print("="*80)
     print("This will take considerable time to complete...")
     print("="*80)
-    
-    # Create experiment runner
-    runner = ExperimentRunner(output_dir='./thesis_results')
-    
-    # Run complete experiment
-    results = runner.run_complete_experiment()
-    
-    print("\nExperiment completed!")
-    print("Results saved in: ./thesis_results/")
-    
+    runner = ExperimentRunner(output_dir=output_dir)
+    results = None
+    if log_stdout:
+        os.makedirs(output_dir, exist_ok=True)
+        log_path = os.path.join(output_dir, f"log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+        with open(log_path, "w") as f:
+            old_stdout = sys.stdout
+            sys.stdout = f
+            try:
+                results = runner.run_complete_experiment()
+            finally:
+                sys.stdout = old_stdout
+        print(f"\nExperiment completed!\nResults saved in: {output_dir}\nLog saved to: {log_path}")
+    else:
+        results = runner.run_complete_experiment()
+        print(f"\nExperiment completed!\nResults saved in: {output_dir}")
     return results
 
 def main():
     """Main entry point"""
-    
+    args = parse_args()
+    if args.headless:
+        import matplotlib
+        matplotlib.use('Agg')
+    # Print help if no args
+    if len(sys.argv) == 1:
+        print("\nRun a demo with: python main.py")
+        print("Run full experiment: python main.py --full")
+        print("For more options: python main.py --help")
     # Check dependencies
     if not check_dependencies():
         sys.exit(1)
-    
     print("\n" + "="*80)
     print("THESIS IMPLEMENTATION: SHORT-TERM VOLATILITY FORECASTING")
     print("Using ML/DL Models for AU and US Financial Markets")
     print("="*80)
-    
-    # Parse command line arguments
-    if len(sys.argv) > 1 and sys.argv[1] == '--full':
-        # Run full experiment
-        run_full_experiment()
+    if args.full:
+        run_full_experiment(output_dir=args.output, log_stdout=True)
     else:
-        # Run quick demo
         run_quick_demo()
         print("\nTo run the full experiment, use: python main.py --full")
 
 if __name__ == "__main__":
     main()
 
-# setup.py - Installation helper
-"""
-Setup script to prepare the environment for thesis experiments
-"""
-
-import subprocess
-import sys
-
-def setup_environment():
-    """Set up the Python environment"""
-    
-    print("Setting up thesis experiment environment...")
-    
-    # Install required packages
-    print("\nInstalling required packages...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
-    
-    # Create necessary directories
-    import os
-    directories = ['./results', './thesis_results', './logs', './models']
-    for dir in directories:
-        os.makedirs(dir, exist_ok=True)
-        print(f"Created directory: {dir}")
-    
-    print("\nEnvironment setup complete!")
-    print("You can now run the experiments using: python main.py")
-
-if __name__ == "__main__":
-    setup_environment()

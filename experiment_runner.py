@@ -109,65 +109,67 @@ class ExperimentRunner:
         self.output_dir = output_dir
         self.results = {}
         self.interpretability = InterpretabilityAnalysis()
-        
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
+        # Save experiment config
+        self.assets = {
+            'US': ['AAPL', 'MSFT', '^GSPC'],
+            'AU': ['IOZ.AX', 'CBA.AX', 'BHP.AX']
+        }
+        self.tasks = ['regression', 'classification']
+        self.n_splits = 5
+        config = {
+            'assets': self.assets,
+            'tasks': self.tasks,
+            'n_splits': self.n_splits,
+            'output_dir': self.output_dir,
+            'datetime': datetime.now().isoformat()
+        }
+        with open(os.path.join(self.output_dir, 'experiment_config.json'), 'w') as f:
+            json.dump(config, f, indent=2)
         
     def run_complete_experiment(self):
         """Run the complete experiment as outlined in the thesis"""
-        
         print("="*80)
         print("THESIS EXPERIMENT: SHORT-TERM VOLATILITY FORECASTING")
         print("="*80)
-        
+        print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         # Initialize pipeline
         from risk_pipeline import RiskPipeline  # Import from first artifact
         pipeline = RiskPipeline()
         pipeline.run_pipeline()
-        
         # Define experiment configuration
-        assets = {
-            'US': ['AAPL', 'MSFT', '^GSPC'],
-            'AU': ['IOZ.AX', 'CBA.AX', 'BHP.AX']
-        }
-        
-        tasks = ['regression', 'classification']
-        
+        assets = self.assets
+        tasks = self.tasks
         # Run experiments for each asset and task
         for market, tickers in assets.items():
             for ticker in tickers:
                 if ticker not in pipeline.features:
                     print(f"\nSkipping {ticker} - no data available")
                     continue
-                    
                 for task in tasks:
                     print(f"\n{'='*60}")
                     print(f"Experiment: {ticker} ({market}) - {task}")
                     print(f"{'='*60}")
-                    
                     # Run models
                     task_results = self._run_task_experiment(pipeline, ticker, task)
-                    
                     # Store results
                     key = f"{ticker}_{task}"
                     self.results[key] = task_results
-                    
                     # Save intermediate results
                     self._save_results(key, task_results)
-        
         # Generate summary report
         self._generate_summary_report()
-        
+        print(f"Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         return self.results
     
     def _run_task_experiment(self, pipeline, ticker, task):
         """Run experiment for a specific asset and task"""
-        
         # Prepare data
         X, y, scaler = pipeline.prepare_ml_data(ticker, task=task)
         
         # Get walk-forward splits
-        splits = pipeline.walk_forward_split(X, y, n_splits=5)
+        splits = pipeline.walk_forward_split(X, y, n_splits=self.n_splits)
         
         # Models to evaluate based on task
         if task == 'regression':
@@ -222,8 +224,8 @@ class ExperimentRunner:
                         # Prepare sequences for LSTM
                         X_train_seq, y_train_seq = self._prepare_lstm_data(X_train, y_train)
                         X_test_seq, y_test_seq = self._prepare_lstm_data(
-                            pd.concat([X_train.tail(10), X_test]), 
-                            pd.concat([y_train.tail(10), y_test])
+                            pd.concat([X_train.iloc[-10:], X_test]),
+                            pd.concat([y_train.iloc[-10:], y_test])
                         )
                         X_test_seq = X_test_seq[-len(X_test):]
                         y_test_seq = y_test_seq[-len(X_test):]
@@ -435,15 +437,12 @@ class XGBoostClassifier:
         self.model = xgb.XGBClassifier(n_estimators=100, random_state=42)
         self.label_map = {'Low': 0, 'Medium': 1, 'High': 2}
         self.reverse_map = {v: k for k, v in self.label_map.items()}
-    
     def fit(self, X, y):
         y_numeric = [self.label_map.get(label, label) for label in y]
         self.model.fit(X, y_numeric)
-    
     def predict(self, X):
         y_pred_numeric = self.model.predict(X)
         return [self.reverse_map.get(pred, pred) for pred in y_pred_numeric]
-    
     def get_model(self):
         return self.model
 
@@ -453,16 +452,54 @@ class MLPWrapper:
         self.model = MLPClassifier(hidden_layer_sizes=(100, 50), max_iter=200, random_state=42)
         self.label_map = {'Low': 0, 'Medium': 1, 'High': 2}
         self.reverse_map = {v: k for k, v in self.label_map.items()}
-    
     def fit(self, X, y):
         y_numeric = [self.label_map.get(label, label) for label in y]
         self.model.fit(X, y_numeric)
-    
     def predict(self, X):
         y_pred_numeric = self.model.predict(X)
         return [self.reverse_map.get(pred, pred) for pred in y_pred_numeric]
 
-# Similar wrappers for LSTM and StockMixer would be implemented...
+# LSTM and StockMixer wrappers with get_model for SHAP compatibility
+class LSTMRegressor:
+    def __init__(self, n_features):
+        # Placeholder: replace with actual model if available
+        self.model = None
+    def fit(self, X, y):
+        pass
+    def predict(self, X):
+        return np.zeros(len(X))
+    def get_model(self):
+        return self.model
+
+class LSTMClassifier:
+    def __init__(self, n_features):
+        self.model = None
+    def fit(self, X, y):
+        pass
+    def predict(self, X):
+        return np.zeros(len(X))
+    def get_model(self):
+        return self.model
+
+class StockMixerRegressor:
+    def __init__(self, n_features):
+        self.model = None
+    def fit(self, X, y):
+        pass
+    def predict(self, X):
+        return np.zeros(len(X))
+    def get_model(self):
+        return self.model
+
+class StockMixerClassifier:
+    def __init__(self, n_features):
+        self.model = None
+    def fit(self, X, y):
+        pass
+    def predict(self, X):
+        return np.zeros(len(X))
+    def get_model(self):
+        return self.model
 
 if __name__ == "__main__":
     # Run the complete experiment
