@@ -26,6 +26,9 @@ def parse_args():
     parser.add_argument('--full', action='store_true', help="Run the full thesis experiment")
     parser.add_argument('--output', type=str, default='./thesis_results', help="Directory to save results")
     parser.add_argument('--headless', action='store_true', help="Run in headless mode (no GUI backend)")
+    parser.add_argument('--asset', type=str, default=None, help="Asset ticker to run experiment on (e.g., AAPL)")
+    parser.add_argument('--start-date', type=str, default=None, help="Start date for experiment (YYYY-MM-DD)")
+    parser.add_argument('--end-date', type=str, default=None, help="End date for experiment (YYYY-MM-DD)")
     return parser.parse_args()
 
 def check_dependencies():
@@ -51,26 +54,26 @@ def check_dependencies():
         return False
     return True
 
-def run_quick_demo():
+def run_quick_demo(asset=None, start_date=None, end_date=None):
     """Run a quick demonstration with limited data"""
     print("\n" + "="*80)
     print("QUICK DEMONSTRATION - VOLATILITY FORECASTING")
     print("="*80)
-    
-    # Initialize pipeline with shorter date range for demo
-    pipeline = RiskPipeline(start_date='2023-01-01', end_date='2024-03-31')
+    # Initialize pipeline with user-specified or default date range
+    pipeline = RiskPipeline(
+        start_date=start_date or '2023-01-01',
+        end_date=end_date or '2024-03-31'
+    )
     pipeline.run_pipeline()
-    
     # Run comparison for one asset
-    if 'AAPL' in pipeline.features:
-        # Regression task
+    asset_to_use = asset or 'AAPL'
+    if asset_to_use in pipeline.features:
         print("\n--- Regression Task Demo ---")
-        results = run_model_comparison(pipeline, 'AAPL', 'regression')
-        
-        # Classification task
+        results = run_model_comparison(pipeline, asset_to_use, 'regression')
         print("\n--- Classification Task Demo ---")
-        results = run_model_comparison(pipeline, 'AAPL', 'classification')
-    
+        results = run_model_comparison(pipeline, asset_to_use, 'classification')
+    else:
+        print(f"Asset {asset_to_use} not found in features. Available: {list(pipeline.features.keys())}")
     print("\nDemo completed! Run with --full for complete thesis experiment.")
 
 def run_full_experiment(output_dir='./thesis_results', log_stdout=True):
@@ -119,7 +122,7 @@ def main():
     if args.full:
         run_full_experiment(output_dir=args.output, log_stdout=True)
     else:
-        run_quick_demo()
+        run_quick_demo(asset=args.asset, start_date=args.start_date, end_date=args.end_date)
         print("\nTo run the full experiment, use: python main.py --full")
 
 if __name__ == "__main__":

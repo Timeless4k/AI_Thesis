@@ -29,7 +29,16 @@ def setup_environment():
     for dir in directories:
         os.makedirs(dir, exist_ok=True)
         print(f"Created directory: {dir}")
-    
+
+    # Log package versions for reproducibility
+    print("\nLogging package versions...")
+    try:
+        with open('./logs/package_versions.txt', 'w') as f:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'freeze'], stdout=f)
+        print("Package versions logged to ./logs/package_versions.txt")
+    except Exception as e:
+        print(f"Warning: Could not log package versions: {e}")
+
     print("\nEnvironment setup complete!")
     print("You can now run the experiments using: python main.py")
 

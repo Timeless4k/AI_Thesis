@@ -136,7 +136,10 @@ class ExperimentRunner:
         print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         # Initialize pipeline
         from risk_pipeline import RiskPipeline  # Import from first artifact
-        pipeline = RiskPipeline()
+        pipeline = RiskPipeline(
+            start_date=os.environ.get('START_DATE', '2017-01-01'),
+            end_date=os.environ.get('END_DATE', '2024-03-31')
+        )
         pipeline.run_pipeline()
         # Define experiment configuration
         assets = self.assets
